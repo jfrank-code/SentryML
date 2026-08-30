@@ -29,8 +29,8 @@ SentryML is a real-time HTTP threat-detection engine: it parses server logs (or 
 **Which Python command to use:** macOS/Linux typically ship both Python 2 and 3, so the command is `python3` to be unambiguous. Windows typically only has Python 3 installed, under the command `python` (or `py`). If one doesn't work, try the other — whichever runs `Python 3.10+` when you check `python --version` / `python3 --version` is the right one for this project.
 
 ```bash
-git clone <this-repo-url>
-cd sentryml
+git clone https://github.com/jfrank-code/SentryML.git
+cd SentryML
 python3 --version        # or: python --version  (needs 3.10+; built & tested on 3.14)
 
 # 1. Confirm zero third-party imports
@@ -102,7 +102,7 @@ Modules actually imported, project-wide: `argparse`, `json`, `os`, `random`, `ti
 ## Project layout
 
 ```
-sentryml/
+sentryML/
 ├── README.md
 ├── STDLIB.md
 ├── requirements.txt      # empty — dependencies: {}
