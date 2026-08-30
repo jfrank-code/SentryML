@@ -1,0 +1,25 @@
+# STDLIB.md — Substitution Log
+
+Every package we would normally have `pip install`-ed, and the standard-library feature used instead. Python 3.14, zero third-party runtime dependencies.
+
+| Package we'd normally install | Weekly PyPI downloads (approx.) | stdlib replacement | Where / what it does |
+|---|---|---|---|
+| **scikit-learn** ⭐ Package Killer highlight | ~57.6M/week ([pypistats.org](https://pypistats.org/packages/scikit-learn)) | `math` + `collections` | `engine.py::KMeansNative` — full Lloyd's-algorithm K-Means from scratch: centroid init, iterative assignment via Euclidean distance, centroid recomputation, convergence check, plus a `predict_point` inference path that classifies against fixed, pre-trained centroids without re-running training. |
+| **scipy** | high (core scientific stack) | `math.log2()` + `sorted()` | `engine.py::StatsEngine` — Shannon entropy (`-Σ p·log2(p)`) for path-diversity anomaly detection, and Median Absolute Deviation (MAD) for a robust, outlier-resistant alternative to a classic z-score. |
+| **cryptography / pycryptodome** | high | `hashlib` + `hmac` + `secrets` | `crypto.py::SecurityManager` — HMAC-SHA256 anonymization of IPs before persistence or alerting, with a CSPRNG-generated 16-byte salt (`secrets.token_bytes`, not `random`) persisted across restarts for hash consistency. |
+| **geopy / geoip2 / maxminddb** | high | `csv` + hand-written binary search (no `bisect`) | `geo.py::GeoEngine` — loads an IP-range→country CSV (RIR/RIPE-style) into memory, sorts it once, and resolves any IP to a country in O(log N) via a manually implemented binary search (low/high/mid), with a built-in fallback dataset and strict IP validation (invalid input never resolves to `0.0.0.0` by accident). |
+| **watchdog / pygtail** | moderate–high | `open()` + `seek()` + `time.sleep()` polling | `ingest.py::tail_file` — a hand-written `tail -f` equivalent: opens the log file, seeks to the end (no historical reprocessing), and polls for new lines, yielding them as they arrive. |
+| **requests / httpx** | very high | `urllib.request` | `defense.py::send_alert` — dispatches structured JSON alerts to a Discord/Slack-compatible webhook via a plain `Request` + `urlopen`, no connection-pooling client library. |
+| **rich / colorama** | high | Raw ANSI escape codes | `__main__.py::render_tui` — the live console dashboard (color-coded threat level, progress bar rendered with `█`/`░` block characters) is built entirely with raw `\033[...m` escape sequences, no terminal-styling library. |
+| **click / typer** | high | `argparse` | `__main__.py::main` — CLI flags (`--bench`, `--webhook`, `--log-file`) handled with the standard library's argument parser; no decorator-based CLI framework. |
+| **python-iptables** | moderate | `subprocess` + the `iptables` binary directly | `defense.py::block_ip` — invokes `iptables -A INPUT -s <ip> -j DROP` via `subprocess.run`, with a software-level fallback (`is_blocked()` filtering before the engine processes an IP) if the command isn't available — no Python iptables wrapper. |
+| **sqlalchemy / a real database driver** | very high | `json` + `open()` | `__main__.py::load_state` / `save_state` — blocked-IP list and the anonymization salt persist to `sentry_state.json` between runs; a lightweight, honest choice for the scope of this engine (not claiming to be a full embedded database). |
+| **pytest** | very high | `unittest` | `tests/` — the entire 30-test suite runs on the standard library's `unittest` module (`python3 -m unittest discover`). No test framework dependency at all, so this isn't even claimed under the hackathon's dev-only-dependency exception — it's genuinely zero-dep, including tests. |
+
+## A deliberately honest note on scope
+
+`pandas` doesn't appear above as a 1:1 substitution. The sliding-window request-rate tracking in the demo loop and the per-IP path/timestamp buffers in `ingest.py` (`collections.deque` with `maxlen`) replace the *specific slice* of pandas' functionality this project needed — fixed-size rolling buffers and simple aggregation — not pandas as a whole (vectorized joins, groupby, arbitrary dataframe operations are out of scope here and would be a stretch to claim as "replaced"). We'd rather state that plainly than pad the table with an inflated substitution.
+
+## Algorithms, not vendored code
+
+K-Means (Lloyd's algorithm), Shannon entropy, MAD, and binary search are described in any standard textbook or the original papers that introduced them — they are not the intellectual property of scikit-learn, scipy, or any specific library. Every implementation in this repository was written from the algorithm's mathematical definition, in our own code structure and variable naming, during this hackathon window — not copied or adapted from any third-party library's source (which, in scikit-learn's case, is largely Cython/C, not even the same language).
