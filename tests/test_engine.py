@@ -20,12 +20,13 @@ class TestShannonEntropy(unittest.TestCase):
     self.assertEqual(StatsEngine.shannon_entropy([]), 0.0)
 
   def test_single_repeated_path_is_zero_entropy(self):
+    # All the "probability mass" on a single path -> no uncertainty
     self.assertAlmostEqual(
         StatsEngine.shannon_entropy(["/index.html"] * 10), 0.0
     )
 
   def test_uniform_distribution_is_max_entropy(self):
-# 4 distinct routes, each once -> entropy = log2(4) = 2.0
+    # 4 distinct routes, each occurring once -> entropy = log2(4) = 2.0
     paths = ["/a", "/b", "/c", "/d"]
     self.assertAlmostEqual(StatsEngine.shannon_entropy(paths), math.log2(4))
 
@@ -47,8 +48,6 @@ class TestCalculateMAD(unittest.TestCase):
     self.assertEqual(mad, 0.0)
 
   def test_mad_robust_to_single_outlier(self):
-    # An extreme outlier should not cause the MAD to spike as much as it would otherwise affect it.
-    # to a standard deviation -> that is why MAD is used, not std.
     values = [10.0, 11.0, 9.0, 10.0, 10.0, 5000.0]
     median, mad = StatsEngine.calculate_mad(values)
     self.assertLess(mad, 50.0)
@@ -84,7 +83,6 @@ class TestKMeansNative(unittest.TestCase):
     for _ in range(10):
       self.assertEqual(kmeans.predict_point([15.0, 15.0]), first)
 
-    # And a point from another group must clearly fall into a different cluster.
     far_point_cluster = kmeans.predict_point([2010.0, 2010.0])
     self.assertNotEqual(first, far_point_cluster)
 

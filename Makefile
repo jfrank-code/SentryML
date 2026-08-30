@@ -7,6 +7,11 @@ PYTHON := $(shell command -v python3 2>/dev/null || command -v python)
 run:
 	cd src && $(PYTHON) __main__.py
 
+# Runs the live web dashboard (http.server + Server-Sent Events).
+# Open http://localhost:8000 (or $PORT if set) after starting.
+web:
+	cd src && $(PYTHON) __main__.py --web
+
 # Runs the engine against a real log: make demo LOG=/path/to/access.log
 demo:
 	cd src && $(PYTHON) __main__.py --log-file $(LOG)

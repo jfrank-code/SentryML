@@ -27,6 +27,10 @@ class DefenseModule:
     except Exception:
       return "SOFTWARE_FILTERED"
 
+  def reset(self):
+    """Limpia la lista de IPs bloqueadas en memoria."""
+    self.blocked_ips.clear()
+
   def send_alert(self, payload: dict) -> bool:
     if not self.webhook_url:
       return False

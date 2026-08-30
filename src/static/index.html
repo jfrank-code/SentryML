@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SentryML — Live Defense Console</title>
+<style>
+  :root {
+    --void: #05070a;
+    --panel: #0d1420;
+    --panel-2: #121b2b;
+    --border: #1e2a3d;
+    --phosphor: #39d97a;
+    --amber: #ffb020;
+    --alert: #ff4757;
+    --signal: #4fc3f7;
+    --text: #e8edf2;
+    --text-dim: #7c8797;
+    --mono: ui-monospace, "SF Mono", "Cascadia Code", "Consolas", "Menlo", monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--void);
+    background-image:
+      radial-gradient(ellipse at top, rgba(57,217,122,0.05), transparent 60%),
+      repeating-linear-gradient(180deg, rgba(255,255,255,0.012) 0px, rgba(255,255,255,0.012) 1px, transparent 1px, transparent 3px);
+    color: var(--text);
+    font-family: var(--mono);
+    min-height: 100vh;
+  }
+
+  .wrap { max-width: 1160px; margin: 0 auto; padding: 28px 24px 60px; }
+
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding-bottom: 20px; border-bottom: 1px solid var(--border); margin-bottom: 26px;
+  }
+  .brand { display: flex; align-items: baseline; gap: 14px; }
+  .brand h1 {
+    font-size: 22px; letter-spacing: 3px; margin: 0; font-weight: 700;
+    color: var(--text);
+  }
+  .brand .eyebrow {
+    font-size: 11px; letter-spacing: 2px; color: var(--text-dim); text-transform: uppercase;
+  }
+  .header-actions { display: flex; align-items: center; gap: 16px; }
+  .status { display: flex; align-items: center; gap: 8px; font-size: 12px; letter-spacing: 1px; }
+  .dot {
+    width: 8px; height: 8px; border-radius: 50%; background: var(--text-dim);
+  }
+  .dot.live { background: var(--phosphor); box-shadow: 0 0 8px var(--phosphor); animation: pulse 1.6s infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+  @media (prefers-reduced-motion: reduce) { .dot.live { animation: none; } }
+
+  .btn-reset {
+    background: transparent;
+    border: 1px solid var(--alert);
+    color: var(--alert);
+    padding: 6px 12px;
+    border-radius: 4px;
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+  .btn-reset:hover {
+    background: var(--alert);
+    color: #fff;
+    box-shadow: 0 0 10px rgba(255, 71, 87, 0.4);
+  }
+
+  .stats {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 18px;
+  }
+  .stat {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
+    padding: 16px 18px;
+  }
+  .stat .label { font-size: 10px; letter-spacing: 1.5px; color: var(--text-dim); text-transform: uppercase; margin-bottom: 8px; }
+  .stat .value { font-size: 26px; font-weight: 700; }
+  .stat .value.small { font-size: 17px; }
+
+  .badge {
+    display: inline-block; padding: 3px 10px; border-radius: 3px; font-size: 12px;
+    font-weight: 700; letter-spacing: 0.5px; border: 1px solid currentColor;
+  }
+  .risk-low  { color: var(--phosphor); }
+  .risk-med  { color: var(--amber); }
+  .risk-high { color: var(--alert); }
+
+  .scope {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
+    padding: 16px 18px 10px; margin-bottom: 18px;
+  }
+  .scope .label { font-size: 10px; letter-spacing: 1.5px; color: var(--text-dim); text-transform: uppercase; margin-bottom: 10px; }
+  canvas { width: 100%; height: 140px; display: block; }
+
+  .log-panel {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
+    padding: 14px 0;
+  }
+  .log-panel .label { font-size: 10px; letter-spacing: 1.5px; color: var(--text-dim); text-transform: uppercase; padding: 0 18px 10px; border-bottom: 1px solid var(--border); margin-bottom: 4px; }
+  #log {
+    height: 300px; overflow-y: auto; padding: 6px 18px; font-size: 13px; line-height: 1.65;
+  }
+  .line { border-left: 3px solid transparent; padding-left: 10px; margin: 3px 0; white-space: pre-wrap; }
+  .line.attack   { border-color: var(--alert); color: #ffb3bb; }
+  .line.filtered { border-color: var(--amber); color: #ffd28a; }
+  .line.normal   { border-color: var(--phosphor); color: #a8f0c6; }
+  .line .ts { color: var(--text-dim); }
+
+  footer {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-top: 22px; padding-top: 16px; border-top: 1px solid var(--border);
+    font-size: 11px; color: var(--text-dim); letter-spacing: 0.5px;
+  }
+  footer .zero-dep { color: var(--phosphor); border-color: var(--phosphor); }
+
+  @media (max-width: 720px) {
+    .stats { grid-template-columns: repeat(2, 1fr); }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="brand">
+      <h1>SENTRYML</h1>
+      <span class="eyebrow">Track E · Zero Dependency Hackathon 2026</span>
+    </div>
+    <div class="header-actions">
+      <button class="btn-reset" onclick="resetState()">🔄 RESET IPS</button>
+      <div class="status">
+        <span class="dot" id="statusDot"></span>
+        <span id="statusText">CONNECTING…</span>
+      </div>
+    </div>
+  </header>
+
+  <div class="stats">
+    <div class="stat">
+      <div class="label">Threat Level</div>
+      <div class="value" id="threatValue">—</div>
+      <div id="riskBadge" class="badge risk-low">LOW_RISK</div>
+    </div>
+    <div class="stat">
+      <div class="label">Traffic Pattern</div>
+      <div class="value small" id="patternValue">—</div>
+    </div>
+    <div class="stat">
+      <div class="label">Requests / sec</div>
+      <div class="value" id="rpsValue">—</div>
+    </div>
+    <div class="stat">
+      <div class="label">Mitigated IPs</div>
+      <div class="value" id="mitigatedValue">0</div>
+    </div>
+  </div>
+
+  <div class="scope">
+    <div class="label">Threat Score — Live Trace</div>
+    <canvas id="waveform" width="1120" height="140"></canvas>
+  </div>
+
+  <div class="log-panel">
+    <div class="label">Live Threat Events</div>
+    <div id="log"></div>
+  </div>
+
+  <footer>
+    <span class="badge zero-dep">0 THIRD-PARTY DEPENDENCIES</span>
+    <span>http.server + Server-Sent Events · no Flask, no CDN, no JS framework</span>
+  </footer>
+
+</div>
+
+<script>
+  const scoreHistory = [];
+  const MAX_POINTS = 120;
+  const MAX_LOG_LINES = 60;
+
+  const canvas = document.getElementById('waveform');
+  const ctx = canvas.getContext('2d');
+
+  function resetState() {
+    fetch('/reset', { method: 'POST' }).then(() => {
+      scoreHistory.length = 0;
+      document.getElementById('log').innerHTML = '';
+      document.getElementById('threatValue').textContent = '—';
+      document.getElementById('patternValue').textContent = '—';
+      document.getElementById('rpsValue').textContent = '—';
+      document.getElementById('mitigatedValue').textContent = '0';
+      const badge = document.getElementById('riskBadge');
+      badge.textContent = 'LOW_RISK';
+      badge.className = 'badge risk-low';
+      drawWaveform();
+    }).catch(err => console.error('Error resetting state:', err));
+  }
+
+  function colorFor(risk) {
+    if (risk === 'HIGH_RISK') return '#ff4757';
+    if (risk === 'MED_RISK') return '#ffb020';
+    return '#39d97a';
+  }
+
+  function drawWaveform() {
+    const w = canvas.width, h = canvas.height;
+    ctx.clearRect(0, 0, w, h);
+
+    // subtle grid
+    ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+    ctx.lineWidth = 1;
+    for (let i = 1; i < 4; i++) {
+      const y = (h / 4) * i;
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+    }
+
+    if (scoreHistory.length < 2) return;
+
+    const stepX = w / (MAX_POINTS - 1);
+    const latest = scoreHistory[scoreHistory.length - 1];
+    const lineColor = colorFor(latest.risk);
+
+    ctx.beginPath();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = lineColor;
+    ctx.shadowColor = lineColor;
+    ctx.shadowBlur = 8;
+
+    scoreHistory.forEach((pt, i) => {
+      const x = i * stepX;
+      const y = h - (pt.score / 100) * h;
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+  }
+
+  function pad(n) { return n < 10 ? '0' + n : '' + n; }
+
+  function logLine(ev) {
+    const log = document.getElementById('log');
+    const div = document.createElement('div');
+    const now = new Date();
+    const ts = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+
+    let cls = 'normal', text;
+    if (ev.status === 'filtered') {
+      cls = 'filtered';
+      const cCode = ev.country ? ` (${ev.country})` : '';
+      text = `IP ${ev.ip}${cCode} already blocked — filtered at software level`;
+    } else if (ev.status === 'attack') {
+      cls = 'attack';
+      text = `[ATTACK] ${ev.ip} (${ev.country}) → hash ${ev.ip_hash} | entropy ${ev.entropy.toFixed(2)} | pattern ${ev.traffic_pattern} | ${ev.action}`;
+    } else {
+      text = `[NORMAL] ${ev.ip} (${ev.country}) → pattern ${ev.traffic_pattern} | entropy ${ev.entropy.toFixed(2)}`;
+    }
+
+    div.className = 'line ' + cls;
+    div.innerHTML = `<span class="ts">${ts}</span>  ${text}`;
+    log.appendChild(div);
+
+    while (log.children.length > MAX_LOG_LINES) log.removeChild(log.firstChild);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  function updateStats(ev) {
+    document.getElementById('threatValue').textContent = ev.threat_score.toFixed(1) + '%';
+    document.getElementById('patternValue').textContent = ev.traffic_pattern;
+    document.getElementById('rpsValue').textContent = ev.rps.toFixed(0);
+    document.getElementById('mitigatedValue').textContent = ev.mitigated_count;
+
+    const badge = document.getElementById('riskBadge');
+    badge.textContent = ev.risk_level;
+    badge.className = 'badge ' + (
+      ev.risk_level === 'HIGH_RISK' ? 'risk-high' :
+      ev.risk_level === 'MED_RISK' ? 'risk-med' : 'risk-low'
+    );
+  }
+
+  function onEvent(ev) {
+    scoreHistory.push({ score: ev.threat_score, risk: ev.risk_level });
+    while (scoreHistory.length > MAX_POINTS) scoreHistory.shift();
+    drawWaveform();
+    updateStats(ev);
+    logLine(ev);
+  }
+
+  const source = new EventSource('/events');
+  source.onopen = () => {
+    document.getElementById('statusDot').classList.add('live');
+    document.getElementById('statusText').textContent = 'LIVE';
+  };
+  source.onerror = () => {
+    document.getElementById('statusDot').classList.remove('live');
+    document.getElementById('statusText').textContent = 'RECONNECTING…';
+  };
+  source.onmessage = (msg) => {
+    try { onEvent(JSON.parse(msg.data)); } catch (e) { /* ignore malformed frame */ }
+  };
+
+  drawWaveform();
+</script>
+</body>
+</html>

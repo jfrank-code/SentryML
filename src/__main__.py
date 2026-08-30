@@ -10,6 +10,7 @@ from defense import DefenseModule
 from engine import KMeansNative, StatsEngine
 from geo import GeoEngine
 from ingest import PerIPWindow, parse_log_line, tail_file
+from webserver import EventBroadcaster, start_web_server
 
 RED = "\033[91m"
 GREEN = "\033[92m"
@@ -211,9 +212,21 @@ def run_benchmark():
   )
 
 
-def run_demo_mode(kmeans, pattern_map, geo, defense, sec):
+def run_demo_loop(kmeans, pattern_map, geo, defense, sec, on_tick, sleep_seconds=0.4):
+  """Core synthetic-traffic detection loop. Calls on_tick(dict) once per
+  iteration with a JSON-serializable snapshot of that tick's results.
+
+  Both the terminal UI and the web dashboard drive from this single loop,
+  so their detection logic can never drift apart from each other.
+
+  risk_level and traffic_pattern are two INDEPENDENT signals on purpose
+  (a fixed-threshold formula vs. distance to trained K-Means centroids).
+  They will sometimes disagree — e.g. a MED_RISK score landing in the
+  MASS_ATTACK cluster — and that disagreement is real, honest information,
+  not a bug to paper over with an invented label. See README, "Design
+  notes", for why they're kept separate rather than reconciled.
+  """
   rps_history = [150.0, 200.0, 180.0, 220.0, 190.0]
-  last_alert = "System clear. No anomalies detected."
   tick = 0
 
   while True:
@@ -228,16 +241,19 @@ def run_demo_mode(kmeans, pattern_map, geo, defense, sec):
 
     ip = generate_dynamic_ip()
     paths, rps, entropy = generate_traffic_sample(profile)
+    country = geo.lookup(ip)
 
     if defense.is_blocked(ip):
-      last_alert = (
-          f"{YELLOW}[FILTERED] IP: {ip} blocked at software level."
-          f" Skipped engine.{RESET}"
-      )
+      on_tick({
+          "status": "filtered",
+          "ip": ip, "country": country, "rps": 0.0, "entropy": 0.0,
+          "threat_score": 0.0, "risk_level": "LOW_RISK",
+          "traffic_pattern": "NORMAL_TRAFFIC",
+          "mitigated_count": len(defense.blocked_ips),
+          "action": None, "ip_hash": None,
+      })
       time.sleep(0.3)
       continue
-
-    country = geo.lookup(ip)
 
     rps_history.append(float(rps))
     if len(rps_history) > 30:
@@ -253,6 +269,8 @@ def run_demo_mode(kmeans, pattern_map, geo, defense, sec):
     cluster_idx = kmeans.predict_point(point)
     pattern_label = pattern_map.get(cluster_idx, "NORMAL_TRAFFIC")
 
+    action = None
+    anon_ip = None
     if threat_score > RISK_MED_MAX:
       anon_ip = sec.anonymize_ip(ip)
       action = defense.block_ip(ip)
@@ -265,25 +283,62 @@ def run_demo_mode(kmeans, pattern_map, geo, defense, sec):
           "traffic_pattern": pattern_label,
       })
       save_state(list(defense.blocked_ips), sec.salt)
+      status = "attack"
+    else:
+      status = "normal"
+
+    on_tick({
+        "status": status,
+        "ip": ip, "country": country, "rps": float(rps), "entropy": entropy,
+        "threat_score": threat_score, "risk_level": risk_label,
+        "traffic_pattern": pattern_label,
+        "mitigated_count": len(defense.blocked_ips),
+        "action": action, "ip_hash": anon_ip,
+    })
+    time.sleep(sleep_seconds)
+
+
+def run_demo_mode(kmeans, pattern_map, geo, defense, sec):
+  """Terminal UI, driven by run_demo_loop."""
+
+  def _cli_tick(data):
+    if data["status"] == "filtered":
       last_alert = (
-          f"{RED}[ATTACK] IP: {ip} ({country}) -> Hash: {anon_ip} | Entropy:"
-          f" {entropy:.2f} | Pattern: {pattern_label} | Action:"
-          f" {action}{RESET}"
+          f"{YELLOW}[FILTERED] IP: {data['ip']} ({data['country']}) blocked at"
+          f" software level. Skipped engine.{RESET}"
+      )
+    elif data["status"] == "attack":
+      last_alert = (
+          f"{RED}[ATTACK] IP: {data['ip']} ({data['country']}) -> Hash:"
+          f" {data['ip_hash']} | Entropy: {data['entropy']:.2f} | Pattern:"
+          f" {data['traffic_pattern']} | Action: {data['action']}{RESET}"
       )
     else:
       last_alert = (
-          f"{GREEN}[NORMAL] IP: {ip} ({country}) -> Pattern: {pattern_label} |"
-          f" Entropy: {entropy:.2f}{RESET}"
+          f"{GREEN}[NORMAL] IP: {data['ip']} ({data['country']}) -> Pattern:"
+          f" {data['traffic_pattern']} | Entropy: {data['entropy']:.2f}{RESET}"
       )
 
     _, current_peak = tracemalloc.get_traced_memory()
     memory_mb = current_peak / (1024 * 1024)
 
     render_tui(
-        threat_score, float(rps), len(defense.blocked_ips), memory_mb,
-        last_alert, risk_label, pattern_label, "DEMO (synthetic traffic)",
+        data["threat_score"], data["rps"], data["mitigated_count"], memory_mb,
+        last_alert, data["risk_level"], data["traffic_pattern"],
+        "DEMO (synthetic traffic)",
     )
-    time.sleep(0.4)
+
+  run_demo_loop(kmeans, pattern_map, geo, defense, sec, on_tick=_cli_tick)
+
+
+def run_web_mode(kmeans, pattern_map, geo, defense, sec, host: str, port: int):
+  """Starts the zero-dependency web dashboard (http.server + SSE)."""
+  broadcaster = EventBroadcaster()
+  start_web_server(broadcaster, host, port, defense_ref=defense)
+  print(f"{GREEN}[OK] Web dashboard running at http://{host}:{port}/{RESET}")
+  print(f"{CYAN}[+] Streaming live detection events via /events (SSE)...{RESET}")
+
+  run_demo_loop(kmeans, pattern_map, geo, defense, sec, on_tick=broadcaster.publish)
 
 
 def run_log_mode(log_file, kmeans, pattern_map, geo, defense, sec):
@@ -303,14 +358,15 @@ def run_log_mode(log_file, kmeans, pattern_map, geo, defense, sec):
     path = parsed["path"]
     window.record(ip, path)
 
+    country = geo.lookup(ip)
+
     if defense.is_blocked(ip):
       last_alert = (
-          f"{YELLOW}[FILTERED] IP: {ip} blocked at software level."
+          f"{YELLOW}[FILTERED] IP: {ip} ({country}) blocked at software level."
           f" Skipped engine.{RESET}"
       )
       continue
 
-    country = geo.lookup(ip)
     recent_paths = window.recent_paths(ip)
     entropy = StatsEngine.shannon_entropy(recent_paths)
     rps = window.requests_per_second(ip)
@@ -383,6 +439,24 @@ def main():
           "tail live. If omitted, runs in DEMO mode with synthetic traffic."
       ),
   )
+  parser.add_argument(
+      "--web",
+      action="store_true",
+      help="Serve a live web dashboard (http.server + Server-Sent Events, "
+           "zero third-party dependencies) instead of the terminal UI.",
+  )
+  parser.add_argument(
+      "--port",
+      type=int,
+      default=int(os.environ.get("PORT", 8000)),
+      help="Port for --web mode (default: $PORT env var, or 8000).",
+  )
+  parser.add_argument(
+      "--host",
+      type=str,
+      default="0.0.0.0",
+      help="Host to bind for --web mode (default: 0.0.0.0, all interfaces).",
+  )
   args = parser.parse_args()
 
   if args.bench:
@@ -407,7 +481,9 @@ def main():
   pattern_map = warm_up_kmeans(kmeans)
 
   try:
-    if args.log_file:
+    if args.web:
+      run_web_mode(kmeans, pattern_map, geo, defense, sec, args.host, args.port)
+    elif args.log_file:
       run_log_mode(args.log_file, kmeans, pattern_map, geo, defense, sec)
     else:
       run_demo_mode(kmeans, pattern_map, geo, defense, sec)

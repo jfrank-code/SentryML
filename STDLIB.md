@@ -15,6 +15,9 @@ Every package we would normally have `pip install`-ed, and the standard-library 
 | **python-iptables** | moderate | `subprocess` + the `iptables` binary directly | `defense.py::block_ip` — invokes `iptables -A INPUT -s <ip> -j DROP` via `subprocess.run`, with a software-level fallback (`is_blocked()` filtering before the engine processes an IP) if the command isn't available — no Python iptables wrapper. |
 | **sqlalchemy / a real database driver** | very high | `json` + `open()` | `__main__.py::load_state` / `save_state` — blocked-IP list and the anonymization salt persist to `sentry_state.json` between runs; a lightweight, honest choice for the scope of this engine (not claiming to be a full embedded database). |
 | **pytest** | very high | `unittest` | `tests/` — the entire 30-test suite runs on the standard library's `unittest` module (`python3 -m unittest discover`). No test framework dependency at all, so this isn't even claimed under the hackathon's dev-only-dependency exception — it's genuinely zero-dep, including tests. |
+| **Flask / FastAPI** | very high | `http.server` (`ThreadingHTTPServer`) | `webserver.py` — serves the live web dashboard's HTML and its live event stream, with a hand-written request handler. No routing framework, no WSGI/ASGI server. |
+| **Flask-SocketIO / python-websockets** | high | Server-Sent Events (`text/event-stream`) + the browser's built-in `EventSource` | `webserver.py::EventBroadcaster` fans out live detection events to every connected browser tab over a plain HTTP response kept open — no WebSocket handshake, no socket library, on either side of the connection. |
+| **React / Vue / a JS build step** | very high | Vanilla HTML/CSS/JS | `src/static/index.html` — the live dashboard (real-time canvas waveform, color-coded event log, animated threat gauge) is a single self-contained file: no npm, no bundler, no CDN-hosted library, no external font. |
 
 ## A deliberately honest note on scope
 

@@ -34,7 +34,7 @@ class TestLookupWithFallback(unittest.TestCase):
 
   def setUp(self):
     self.geo = GeoEngine()
-    self.geo.load_db("/path/that/does/not/exist.csv")  
+    self.geo.load_db("/path/that/does/not/exist.csv") 
 
   def test_known_fallback_ip_resolves(self):
     self.assertEqual(self.geo.lookup("8.8.8.8"), "US")

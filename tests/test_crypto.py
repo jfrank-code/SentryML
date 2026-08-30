@@ -26,8 +26,6 @@ class TestSecurityManager(unittest.TestCase):
     )
 
   def test_hash_is_irreversible_by_length(self):
-    # This is not a formal cryptographic proof, but it confirms that the output
-    # is a truncated hash (16 hex chars), not the IP in another form.
     sec = SecurityManager(salt=b"\x00" * 16)
     result = sec.anonymize_ip("8.8.8.8")
     self.assertEqual(len(result), 16)
@@ -36,8 +34,6 @@ class TestSecurityManager(unittest.TestCase):
   def test_no_salt_provided_generates_random_salt(self):
     sec_a = SecurityManager()
     sec_b = SecurityManager()
-
-    # Salts generated with secrets.token_bytes -> practically never identical
     self.assertNotEqual(sec_a.salt, sec_b.salt)
 
 
