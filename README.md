@@ -19,7 +19,7 @@ SentryML is a real-time HTTP threat-detection engine: it parses server logs (or 
 5. **Mitigates actively** — blocks offending IPs via `iptables` (Linux), with an automatic software-level fallback (in-process filtering) if `iptables` is unavailable.
 6. **Alerts externally** — dispatches structured JSON to a configured webhook (Discord/Slack-compatible) via `urllib.request`.
 7. **Persists state** — blocked IPs and the anonymization salt survive restarts (`sentry_state.json`), so hashes stay consistent across sessions.
-8. **Serves a live web dashboard** (optional, `--web`) — a zero-dependency alternative to the terminal UI: `http.server` streams detection events over Server-Sent Events to a vanilla HTML/CSS/JS frontend (no Flask, no Socket.IO, no React, no CDN). Judges can open one URL and watch the engine detect and mitigate threats live, no terminal access needed.
+8. **Serves a live web dashboard** (optional, `--web`) — a zero-dependency alternative to the terminal UI: `http.server` streams detection events over Server-Sent Events to a vanilla HTML/CSS/JS frontend (no Flask, no Socket.IO, no React, no CDN). The dashboard includes **Pause/Resume** and **Reset** controls (`POST /pause`, `/resume`, `/reset`, `GET /status`) — essential for a long-lived deployment, since the engine otherwise never stops generating synthetic traffic. Judges can open one URL and watch the engine detect and mitigate threats live, no terminal access needed.
 
 ---
 
@@ -28,6 +28,8 @@ SentryML is a real-time HTTP threat-detection engine: it parses server logs (or 
 **A note on commands below:** this project only needs a Python interpreter, no `make` — `make` is a convenience wrapper (pre-installed on macOS/Linux, not on Windows by default). If `make` isn't available, use the direct `python`/`python3` commands shown under each `make` target — same result, zero difference in what actually runs.
 
 **Which Python command to use:** macOS/Linux typically ship both Python 2 and 3, so the command is `python3` to be unambiguous. Windows typically only has Python 3 installed, under the command `python` (or `py`). If one doesn't work, try the other — whichever runs `Python 3.10+` when you check `python --version` / `python3 --version` is the right one for this project.
+
+**The web dashboard (`--web`):** also exposes `POST /pause`, `POST /resume`, `GET /status`, and `POST /reset` — visible as buttons in the UI, useful if you're evaluating a long-running deployment instead of a fresh local run.
 
 ```bash
 git clone <this-repo-url>
@@ -140,6 +142,7 @@ sentryml/
 - **Real log mode (`--log-file`) vs demo mode**: the log-mode path (`ingest.py` + `run_log_mode`) computes entropy/RPS from real per-IP state built from actual log lines. Demo mode (`run_demo_mode` / `run_web_mode`) uses the synthetic generator for environments with no real traffic to point at (development, benchmarking, the demo video). Both feed the exact same scoring, clustering, and mitigation pipeline — nothing about the detection logic changes between the two.
 - **The terminal UI and the web dashboard share one detection loop** (`run_demo_loop` in `__main__.py`), driven by an `on_tick` callback — the CLI renders it as colored terminal text, the web mode broadcasts it as JSON over SSE. They can't silently drift apart from each other, because there's only one place the detection math actually runs.
 - **The web frontend has zero external requests**: no CDN scripts, no Google Fonts, no analytics — just the browser's built-in `EventSource` API and system fonts. This was a deliberate choice to keep the "zero dependency" story honest end-to-end, not just in the Python backend.
+- **The web dashboard can be paused.** A synthetic-traffic demo left running for hours or days (e.g. a permanent deployment for judges to try) never stops generating traffic or growing `defense.blocked_ips` — there's no natural end state. A shared `threading.Event` gates the detection loop: `POST /pause` clears it (the loop idles cheaply without processing new traffic, while the HTTP server keeps serving), `POST /resume` sets it again. `GET /status` lets a freshly loaded page pick up the current state, so a second viewer sees "paused" correctly even if someone else paused it first. This doesn't shrink `blocked_ips` on its own — pausing stops it from growing further; **Reset** is what clears it.
 
 ---
 
