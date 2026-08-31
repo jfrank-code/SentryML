@@ -42,7 +42,7 @@ class EventBroadcaster:
       q.put(event)
 
 
-def make_handler(broadcaster: EventBroadcaster, defense_ref=None):
+def make_handler(broadcaster: EventBroadcaster, defense_ref=None, running_event=None):
   class SentryHandler(BaseHTTPRequestHandler):
 
     def log_message(self, fmt, *args):
@@ -53,27 +53,56 @@ def make_handler(broadcaster: EventBroadcaster, defense_ref=None):
         self._serve_static("index.html", "text/html; charset=utf-8")
       elif self.path == "/events":
         self._serve_sse()
+      elif self.path == "/status":
+        self._serve_status()
       else:
         self.send_response(404)
         self.end_headers()
 
     def do_POST(self):
       if self.path == "/reset":
-        if defense_ref is not None:
-          defense_ref.reset()
-        if os.path.exists("sentry_state.json"):
-          try:
-            os.remove("sentry_state.json")
-          except Exception:
-            pass
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.end_headers()
-        self.wfile.write(b'{"status": "ok", "message": "State reset successfully"}')
+        self._handle_reset()
+      elif self.path == "/pause":
+        self._handle_pause()
+      elif self.path == "/resume":
+        self._handle_resume()
       else:
         self.send_response(404)
         self.end_headers()
+
+    def _json_response(self, payload: dict):
+      body = json.dumps(payload).encode("utf-8")
+      self.send_response(200)
+      self.send_header("Content-Type", "application/json")
+      self.send_header("Access-Control-Allow-Origin", "*")
+      self.end_headers()
+      self.wfile.write(body)
+
+    def _handle_reset(self):
+      if defense_ref is not None:
+        defense_ref.reset()
+      if os.path.exists("sentry_state.json"):
+        try:
+          os.remove("sentry_state.json")
+        except Exception:
+          pass
+      self._json_response({"status": "ok", "message": "State reset successfully"})
+
+    def _handle_pause(self):
+      if running_event is not None:
+        running_event.clear()
+      broadcaster.publish({"type": "system", "event": "paused"})
+      self._json_response({"status": "ok", "paused": True})
+
+    def _handle_resume(self):
+      if running_event is not None:
+        running_event.set()
+      broadcaster.publish({"type": "system", "event": "resumed"})
+      self._json_response({"status": "ok", "paused": False})
+
+    def _serve_status(self):
+      paused = running_event is not None and not running_event.is_set()
+      self._json_response({"paused": paused})
 
     def _serve_static(self, name: str, content_type: str):
       filepath = STATIC_DIR / name
@@ -112,10 +141,11 @@ def make_handler(broadcaster: EventBroadcaster, defense_ref=None):
   return SentryHandler
 
 
-def start_web_server(broadcaster: EventBroadcaster, host: str, port: int, defense_ref=None) -> ThreadingHTTPServer:
+def start_web_server(broadcaster: EventBroadcaster, host: str, port: int,
+                      defense_ref=None, running_event=None) -> ThreadingHTTPServer:
   """Starts the server in a background thread and returns it (so the
   caller can .shutdown() it later if needed)."""
-  handler_cls = make_handler(broadcaster, defense_ref=defense_ref)
+  handler_cls = make_handler(broadcaster, defense_ref=defense_ref, running_event=running_event)
   server = ThreadingHTTPServer((host, port), handler_cls)
   thread = threading.Thread(target=server.serve_forever, daemon=True)
   thread.start()

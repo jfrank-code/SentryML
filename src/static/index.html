@@ -74,6 +74,34 @@
     box-shadow: 0 0 10px rgba(255, 71, 87, 0.4);
   }
 
+  .btn-pause {
+    background: transparent;
+    border: 1px solid var(--amber);
+    color: var(--amber);
+    padding: 6px 12px;
+    border-radius: 4px;
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+  .btn-pause:hover {
+    background: var(--amber);
+    color: #000;
+    box-shadow: 0 0 10px rgba(255, 176, 32, 0.4);
+  }
+  .btn-pause.is-paused {
+    border-color: var(--phosphor);
+    color: var(--phosphor);
+  }
+  .btn-pause.is-paused:hover {
+    background: var(--phosphor);
+    color: #000;
+    box-shadow: 0 0 10px rgba(57, 217, 122, 0.4);
+  }
+
   .stats {
     display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 18px;
   }
@@ -135,6 +163,7 @@
       <span class="eyebrow">Track E · Zero Dependency Hackathon 2026</span>
     </div>
     <div class="header-actions">
+      <button class="btn-pause" id="pauseBtn" onclick="togglePause()">⏸ PAUSE</button>
       <button class="btn-reset" onclick="resetState()">🔄 RESET IPS</button>
       <div class="status">
         <span class="dot" id="statusDot"></span>
@@ -187,6 +216,40 @@
 
   const canvas = document.getElementById('waveform');
   const ctx = canvas.getContext('2d');
+
+  let isPaused = false;
+
+  function setPauseButtonState(paused) {
+    isPaused = paused;
+    const btn = document.getElementById('pauseBtn');
+    if (paused) {
+      btn.textContent = '▶ RESUME';
+      btn.classList.add('is-paused');
+    } else {
+      btn.textContent = '⏸ PAUSE';
+      btn.classList.remove('is-paused');
+    }
+  }
+
+  function togglePause() {
+    const endpoint = isPaused ? '/resume' : '/pause';
+    fetch(endpoint, { method: 'POST' })
+      .then(r => r.json())
+      .then(d => setPauseButtonState(d.paused))
+      .catch(err => console.error('Error toggling pause:', err));
+  }
+
+  function systemLogLine(text) {
+    const log = document.getElementById('log');
+    const div = document.createElement('div');
+    const now = new Date();
+    const ts = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+    div.className = 'line filtered';
+    div.innerHTML = `<span class="ts">${ts}</span>  --- ${text} ---`;
+    log.appendChild(div);
+    while (log.children.length > MAX_LOG_LINES) log.removeChild(log.firstChild);
+    log.scrollTop = log.scrollHeight;
+  }
 
   function resetState() {
     fetch('/reset', { method: 'POST' }).then(() => {
@@ -302,8 +365,28 @@
     document.getElementById('statusText').textContent = 'RECONNECTING…';
   };
   source.onmessage = (msg) => {
-    try { onEvent(JSON.parse(msg.data)); } catch (e) { /* ignore malformed frame */ }
+    try {
+      const data = JSON.parse(msg.data);
+      if (data.type === 'system') {
+        if (data.event === 'paused') {
+          setPauseButtonState(true);
+          systemLogLine('ENGINE PAUSED');
+        } else if (data.event === 'resumed') {
+          setPauseButtonState(false);
+          systemLogLine('ENGINE RESUMED');
+        }
+        return;
+      }
+      onEvent(data);
+    } catch (e) { /* ignore malformed frame */ }
   };
+
+  // Pick up the current pause state on load (in case the page was
+  // refreshed while the engine was already paused by another viewer).
+  fetch('/status')
+    .then(r => r.json())
+    .then(d => setPauseButtonState(d.paused))
+    .catch(() => {});
 
   drawWaveform();
 </script>

@@ -2,6 +2,7 @@ import argparse
 import json
 import os
 import random
+import threading
 import time
 import tracemalloc
 
@@ -212,12 +213,21 @@ def run_benchmark():
   )
 
 
-def run_demo_loop(kmeans, pattern_map, geo, defense, sec, on_tick, sleep_seconds=0.4):
+def run_demo_loop(kmeans, pattern_map, geo, defense, sec, on_tick,
+                   running_event, sleep_seconds=0.4):
   """Core synthetic-traffic detection loop. Calls on_tick(dict) once per
   iteration with a JSON-serializable snapshot of that tick's results.
 
   Both the terminal UI and the web dashboard drive from this single loop,
   so their detection logic can never drift apart from each other.
+
+  `running_event` is a threading.Event: set() = actively processing new
+  traffic, clear() = paused. Pausing is essential for a long-lived
+  deployment (e.g. a demo left running for 24h+) — without it, the engine
+  never stops generating synthetic traffic and blocking IPs, and
+  sentry_state.json / the blocked-IP set grow without bound. While paused,
+  the loop idles cheaply instead of busy-processing traffic; the HTTP
+  server (in web mode) keeps running normally so /resume still works.
 
   risk_level and traffic_pattern are two INDEPENDENT signals on purpose
   (a fixed-threshold formula vs. distance to trained K-Means centroids).
@@ -230,6 +240,10 @@ def run_demo_loop(kmeans, pattern_map, geo, defense, sec, on_tick, sleep_seconds
   tick = 0
 
   while True:
+    if not running_event.is_set():
+      time.sleep(0.3)
+      continue
+
     tick += 1
     cycle = tick % 12
     if cycle < 5:
@@ -328,17 +342,27 @@ def run_demo_mode(kmeans, pattern_map, geo, defense, sec):
         "DEMO (synthetic traffic)",
     )
 
-  run_demo_loop(kmeans, pattern_map, geo, defense, sec, on_tick=_cli_tick)
+  running_event = threading.Event()
+  running_event.set()  # CLI mode has no pause control; always running
+  run_demo_loop(kmeans, pattern_map, geo, defense, sec, on_tick=_cli_tick,
+                running_event=running_event)
 
 
 def run_web_mode(kmeans, pattern_map, geo, defense, sec, host: str, port: int):
-  """Starts the zero-dependency web dashboard (http.server + SSE)."""
+  """Starts the zero-dependency web dashboard (http.server + SSE), with
+  pause/resume control exposed over POST /pause and POST /resume."""
   broadcaster = EventBroadcaster()
-  start_web_server(broadcaster, host, port, defense_ref=defense)
+  running_event = threading.Event()
+  running_event.set()  # starts running; the dashboard's Pause button can clear it
+
+  start_web_server(broadcaster, host, port, defense_ref=defense,
+                    running_event=running_event)
   print(f"{GREEN}[OK] Web dashboard running at http://{host}:{port}/{RESET}")
   print(f"{CYAN}[+] Streaming live detection events via /events (SSE)...{RESET}")
+  print(f"{CYAN}[+] Pause/resume available via POST /pause and POST /resume{RESET}")
 
-  run_demo_loop(kmeans, pattern_map, geo, defense, sec, on_tick=broadcaster.publish)
+  run_demo_loop(kmeans, pattern_map, geo, defense, sec, on_tick=broadcaster.publish,
+                running_event=running_event)
 
 
 def run_log_mode(log_file, kmeans, pattern_map, geo, defense, sec):
